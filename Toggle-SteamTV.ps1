@@ -73,6 +73,18 @@ $ErrorActionPreference = 'Stop'
 Add-Type -Path (Join-Path $PSScriptRoot 'lib\DispInfo.cs')
 Add-Type -Path (Join-Path $PSScriptRoot 'lib\DisplayConfig.cs')
 
+# settings.psd1 is written by Setup.ps1. Command-line values win over it.
+$settingsPath = Join-Path $PSScriptRoot 'settings.psd1'
+$cfg = @{}
+if (Test-Path $settingsPath) {
+    try { $cfg = Import-PowerShellDataFile -Path $settingsPath }
+    catch { Write-Host ("settings.psd1 unreadable: {0}" -f $_.Exception.Message) -ForegroundColor DarkYellow }
+}
+if ($TvTargetId -eq 0 -and $cfg.ContainsKey('TvTargetId')) { $TvTargetId = [uint32]$cfg.TvTargetId }
+if ($PcTargetId -eq 0 -and $cfg.ContainsKey('PcTargetId')) { $PcTargetId = [uint32]$cfg.PcTargetId }
+if (-not $TvAudio -and $cfg.ContainsKey('TvAudio')) { $TvAudio = [string]$cfg.TvAudio }
+if (-not $PcAudio -and $cfg.ContainsKey('PcAudio')) { $PcAudio = [string]$cfg.PcAudio }
+
 function Get-AllTargets {
     $out = @()
     foreach ($line in ([DispConfig]::ListAllTargets() -split "`r?`n")) {

@@ -1,185 +1,180 @@
-# steam-tv
+# Steam TV Switch
 
-One button to put **Steam Big Picture** on your TV, one button to come back —
-with only one display powered at a time.
+**One button: PC → TV, Steam Big Picture launches on the TV, audio follows. Another button: everything back.**
 
-```
-        press TV key                     press PC key
-desktop ──────────► TV only + audio on TV ──────────► desktop only + audio back
-        (Big Picture opens on the TV)
-```
-
-## The problem
-
-Steam Big Picture always opens on the **primary display**, and Steam has no
-setting for "open Big Picture on monitor 2". The only reliable way to get it
-onto a TV is to make the TV the only active output, launch Big Picture, then
-switch back when you are done.
-
-Windows' built-in `DisplaySwitch.exe /external` looks like it solves this, but
-"external" means *the second display in enumeration order*, not *the HDMI one*.
-On a machine where the TV happens to be enumerated first,
-`/external` picks the **other** output — the monitor — the exact opposite of what you want.
-
-This repo does it properly, using `QueryDisplayConfig` / `SetDisplayConfig`
-and the target id of each output.
-
-## How it works
+If your gaming PC is chained to a desk monitor but you actually play on the couch, this removes the last piece of friction — the part where you sit down, realize Big Picture opened on the wrong screen, and go back to the desk to fix display settings.
 
 ```
-controller back button
-        │  (mapped to a physical keyboard key by vendor software)
-        ▼
-  Watch-Keys.ps1          polls GetAsyncKeyState, 40 ms, debounced
-        │
-        ▼
-  Toggle-SteamTV.ps1
-        ├─ DisplaySwitch /extend   ← gives the target a valid mode path
-        ├─ SetDisplayConfig        ← keeps only the chosen target; the other
-        │                            output is really powered down
-        ├─ AudioSwitch.ps1         ← moves the default audio endpoint
-        └─ steam://open/bigpicture
+        ┌───────────────┐   DisplayPort   ┌───────────────┐
+        │    Monitor    │◄───────────────►│      TV       │   HDMI
+        │    (desk)     │                 │   (couch)     │
+        └───────────────┘                 └───────────────┘
+                 ▲                                ▲
+                 └──────────── PC ────────────────┘
 ```
 
-Why `/extend` first: `SetDisplayConfig` returns **87 (ERROR_INVALID_PARAMETER)**
-when you ask it to keep a target that currently has no active mode path. Lighting
-both outputs for a moment gives the driver a path to work with. The visible cost
-is a brief moment of two screens, then one.
+## Does this match your setup?
 
-Why not `ChangeDisplaySettingsEx` with a NULL `DEVMODE`: it does **not** disable
-a display. It only resets that display's position back to its default, which
-leaves the output on.
+You will get value out of this if **all** of these are true:
 
-## Requirements
+- One PC, two displays: a monitor at the desk and a TV on HDMI.
+- You want Steam Big Picture to open **on the TV**, not on the monitor.
+- You want TV audio to become the default output automatically.
+- You have a controller with a spare back button (or are fine pressing a keyboard key).
+- You do not mind that only one screen is lit while you play.
 
-- Windows 10 / 11
-- PowerShell 5.1 (built in) — no extra modules, no third-party executables
-- Steam installed (Big Picture is opened through the `steam://` protocol)
-- Two outputs: one for the desktop, one for the TV
+If Steam Big Picture already opens on the right screen, you do not need this.
 
-## Quick start
+## What one press does
 
-**1. Inspect your displays**
+| Press | Display | Audio | Steam |
+|---|---|---|---|
+| **→ TV** | Monitor off, TV becomes the only screen | Switches to TV output | `steam://open/bigpicture` |
+| **→ PC** | TV off, monitor becomes the only screen | Switches back to speakers | — |
+
+Nothing is left in a half state: if the TV is off or unplugged, the script refuses to switch and says so, instead of leaving you with a black screen.
+
+## Setup — about five minutes, once
+
+### 1. Get the files
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\Get-DisplayInfo.ps1
+git clone https://github.com/OnionK9T/Steam-TV-switch.git
+cd Steam-TV-switch
 ```
 
-Look at the last two tables. You want, for each output, its `tech=` and `id=`:
+No admin rights, no installer, no external tools. Everything is Windows built-ins plus two small C# interop files.
 
-```
-0|SOME TV|tech=5|id=1234|inactive
-1|SOME MONITOR|tech=10|id=5678|active
-```
+### 2. Run the configurator
 
-`tech` is the output technology (`5` = HDMI, `10` = DisplayPort, `4` = DVI,
-`1` = VGA). If your TV and monitor use different technologies, the script
-auto-detects them and you can skip the ids entirely.
-
-**2. Test the switch**
+Double-click **`setup.bat`**, or:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\Toggle-SteamTV.ps1 -ForceTv
-powershell -ExecutionPolicy Bypass -File .\Toggle-SteamTV.ps1 -ForcePc
+powershell -ExecutionPolicy Bypass -File .\Setup.ps1
 ```
 
-If auto-detection is ambiguous (two HDMI outputs, for example), pass the ids:
+It prints your display outputs and asks three questions:
+
+```
+=== displays ===
+  1. SOME MONITOR                  DisplayPort  id=1234     active
+  2. SOME TV                       HDMI         id=5678     inactive
+
+哪一个是电视?输编号: 2
+哪一个是电脑显示器?输编号: 1
+电视用哪个音频?输编号: 2
+桌面音箱是哪个?输编号: 5
+```
+
+It writes `settings.psd1` next to the script. That file holds your display IDs and audio device names, and it is git-ignored — it never leaves your machine.
+
+### 3. Test it
 
 ```powershell
-.\Toggle-SteamTV.ps1 -ForceTv -TvTargetId 1234 -PcTargetId 5678
+.\Toggle-SteamTV.ps1 -ForceTv
 ```
 
-**3. Find your audio endpoint names**
+The monitor goes dark, the TV lights up, Steam Big Picture appears on it, audio moves to the TV. Then:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\AudioSwitch.ps1 -List
+.\Toggle-SteamTV.ps1 -ForcePc
 ```
 
-Pick the substring that identifies the TV output and the desktop speakers.
+Back to normal. If both work, the hard part is done.
 
-**4. Put it together**
+You can also just double-click `toggle-tv.bat` / `toggle-pc.bat`.
+
+### 4. Bind it to a controller button
+
+The script listens to a **keyboard key**, so map your controller's back button to one. On a Flydigi Vader 4 Pro, for example, the Flydigi Space Station maps `M3 → Insert` and `M4 → PgUp` (it captures physical key presses, so only real keyboard keys work — injected keys are ignored).
+
+Then run the listener once:
 
 ```powershell
-.\Toggle-SteamTV.ps1 -ForceTv -TvTargetId 1234 -PcTargetId 5678 `
-    -TvAudio "TV HDMI Output" -PcAudio "Speakers"
+.\Watch-Keys.ps1
 ```
 
-**5. Bind your buttons**
+It polls both keys every 40 ms with a 900 ms debounce and calls the toggle with `-ForceTv` or `-ForcePc`. It does **not** swallow the keys — their normal function stays intact.
 
-Any of these works:
+Prefer double-clicking? Run `watch-keys.bat`.
 
-- Point the vendor software's macro / launch-program action at `toggle-tv.bat`
-  and `toggle-pc.bat` (no extra process, cleanest).
-- If the vendor software can only map buttons to keyboard keys, map one button
-  to `Insert` and another to `Page Up`, then run `watch-keys.bat` (optionally at
-  login). You can change the keys:
+### 5. Start it with Windows (optional)
 
-  ```powershell
-  .\Watch-Keys.ps1 -VkTv 0x2D -VkPc 0x21
-  ```
-
-  `0x2D` = Insert, `0x21` = Page Up, `0x2E` = Delete, `0x22` = Page Down.
-  Full list: [Virtual-Key Codes](https://learn.microsoft.com/windows/win32/inputdev/virtual-key-codes).
-
-## Auto-start
-
-Put a shortcut to `watch-keys.bat` (or to `toggle-tv.bat` if you use the
-launch-program route) in:
-
-```
-%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
-```
-
-`watch-keys.bat` runs a `powershell` window; to keep it invisible, start it with
-a shortcut whose *Run* setting is **Minimized**, or run it through Task Scheduler
-with "Run whether user is logged on or not" disabled and "Hidden" checked.
+Press `Win+R`, type `shell:startup`, and drop a shortcut to `watch-keys.bat` in there.
 
 ## Turning off Xbox Game Bar
 
-If pressing the controller's Guide/Home button also opens Xbox Game Bar:
+If a controller's Guide/Home button also summons Xbox Game Bar, disable it once:
 
-`Settings → Gaming → Xbox Game Bar → turn off "Open Xbox Game Bar using this button on a controller"`
+**Settings → Gaming → Xbox Game Bar → turn off "Open Xbox Game Bar using this button on a controller"**
 
-Registry equivalent:
+Or by registry:
 
+```powershell
+Set-ItemProperty -Path 'HKCU:\Software\Microsoft\GameBar' -Name UseNexusForGameBarEnabled -Value 0 -Type DWord
 ```
-HKCU\Software\Microsoft\GameBar
-    UseNexusForGameBarEnabled = 0   (DWORD)
+
+Also check Steam → Settings → Controller → turn off "Guide button focuses Steam", otherwise you get two overlapping triggers.
+
+## If something goes wrong
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `电视没点亮` / "TV did not light up" | TV is off, asleep, or on another HDMI input | Turn the TV on and select the right input |
+| Both screens stay on | `SetDisplayConfig` returned 87 | Re-run `Setup.ps1`; the display IDs changed after a cable swap |
+| Big Picture opens on the monitor | TV and monitor IDs are swapped in `settings.psd1` | Re-run `Setup.ps1` |
+| Audio does not move | TV audio device is gone (TV off, or HDMI audio disabled) | Turn the TV on first; check Sound settings |
+| Script prints its own source code or fails to parse | File saved without a UTF-8 BOM | Re-save as "UTF-8 with BOM" (PowerShell 5.1 quirk) |
+| Nothing happens on button press | Listener not running, or key not mapped | Run `watch-keys.bat`; check `key-hit.log` |
+
+Diagnostics:
+
+```powershell
+.\Get-DisplayInfo.ps1     # current topology and output IDs
+.\AudioSwitch.ps1 -List   # audio endpoints
+.\Toggle-SteamTV.ps1 -DryRun   # show what it would do, change nothing
 ```
 
-Also check Steam: `Settings → Controller → Guide button focuses Steam` should be
-**off**, otherwise both the Game Bar and Steam react to the same press.
+## How it works (the short version)
 
-## Troubleshooting
+Steam Big Picture follows the **primary display** — there is no "open on display 2" option. So the only way to land it on the TV is to make the TV the primary display for the duration.
 
-| Symptom | Cause / fix |
+The naive approach is `DisplaySwitch.exe /external`. It does not mean "the HDMI one"; it means "the second display in enumeration order". If the TV happens to sort first, `/external` picks the monitor and the direction is reversed.
+
+The reliable sequence is:
+
+1. `DisplaySwitch.exe /extend` — light up the target so it has a valid mode path.
+2. `SetDisplayConfig` — keep only the target output, drop the other.
+3. Switch the default audio endpoint via `IPolicyConfig`.
+4. Launch `steam://open/bigpicture`.
+
+Step 1 is not optional: `SetDisplayConfig` returns `87` (`ERROR_INVALID_PARAMETER`) when the target has no active path. That is also why there is a brief flash of both screens during a switch — it is a structural cost of this approach, not a bug.
+
+## Requirements
+
+- Windows 10 or 11
+- One HDMI and one DisplayPort output (other combinations work; set `-TvTech` / `-PcTech` accordingly)
+- PowerShell 5.1 (built in)
+- Steam
+- Optional: a controller with a remappable button, and its vendor software
+
+## Files
+
+| File | Purpose |
 |---|---|
-| `set=87` | Target is not active. The script already calls `DisplaySwitch /extend` first — if you still get 87, the TV is off, on the wrong input, or unplugged. |
-| Switch happens, but Big Picture opens on the monitor | Wrong target id. Re-run `Get-DisplayInfo.ps1`; ids can change when you move cables or ports. |
-| Nothing happens when pressing the controller button | Vendor software did not capture the key. Check that the mapped key is a **physical** key on your keyboard — software-injected keys have no scan code and are invisible to it. |
-| A key press also types/deletes text | The watcher does not block keys. If the mapped key is one you use, pick a less-used one, or use the launch-program route instead. |
-| Audio did not follow | Endpoint name mismatch. Run `AudioSwitch.ps1 -List` and use a substring of the exact name. The TV endpoint also disappears from the list when the TV is off. |
-| Screen flashes two displays before settling | Expected: `/extend` has to light the target before it can be isolated. |
-| Desktop icons move around | Windows re-lays out the desktop when the topology changes. Not avoidable through these APIs. |
-
-## Known limitations
-
-- The dual-then-single switch always flashes the second output briefly.
-- DisplayConfig target ids are stable per connector, not across cable/port moves.
-- The audio endpoint of a TV only exists while the TV is actually linked; that is
-  why the switch is ordered "display first, audio second".
-- Physical keys used for mapping keep their normal function (the watcher only
-  reads state), but they will also trigger the switch.
+| `Setup.ps1` / `setup.bat` | Detect displays, write `settings.psd1` |
+| `Toggle-SteamTV.ps1` | The actual switch (`-ForceTv`, `-ForcePc`, `-DryRun`) |
+| `Watch-Keys.ps1` / `watch-keys.bat` | Poll two keys, call the toggle |
+| `AudioSwitch.ps1` | List / set the default audio endpoint |
+| `Get-DisplayInfo.ps1` | Print current topology |
+| `lib/DisplayConfig.cs` | `QueryDisplayConfig` / `SetDisplayConfig` interop |
+| `lib/DispInfo.cs` | `EnumDisplayDevices` / `EnumDisplaySettings` interop |
+| `toggle-tv.bat` / `toggle-pc.bat` | Double-click wrappers |
 
 ## Credits
 
-Built with **DSH (DeepSeek Harness)** and **DeepSeek 4.1 Flash**. The architecture,
-the Win32 interop wrappers, and every trap along the way — error `87`, the UTF-8
-BOM parsing bug, the misleading meaning of `DisplaySwitch /external` — were worked
-out in a single assisted session.
+Built with **DSH (DeepSeek Harness)** and **DeepSeek 4.1 Flash**. The architecture, the Win32 interop wrappers, and every trap along the way — error `87`, the UTF-8 BOM parsing bug, the misleading meaning of `DisplaySwitch /external` — were worked out in a single assisted session.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-中文说明见 [README.zh-CN.md](README.zh-CN.md)。
+MIT

@@ -39,6 +39,15 @@ public class KeyState {
 }
 '@
 
+$settingsPath = Join-Path $PSScriptRoot 'settings.psd1'
+if (Test-Path $settingsPath) {
+    try {
+        $cfg = Import-PowerShellDataFile -Path $settingsPath
+        if (-not $PSBoundParameters.ContainsKey('VkTv') -and $cfg.ContainsKey('VkTv')) { $VkTv = [int]$cfg.VkTv }
+        if (-not $PSBoundParameters.ContainsKey('VkPc') -and $cfg.ContainsKey('VkPc')) { $VkPc = [int]$cfg.VkPc }
+    } catch { }
+}
+
 $log = Join-Path $PSScriptRoot 'key-hit.log'
 $lastTv = [Environment]::TickCount - 100000
 $lastPc = [Environment]::TickCount - 100000
